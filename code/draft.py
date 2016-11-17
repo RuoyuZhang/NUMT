@@ -59,24 +59,39 @@ def prob_site(ref_base, seq_base, Q, h, pts, ch, position, var_freq):
 # function to calculate log likelihood across entrire read
 def prob_read(read, qual, mutation_matrix, h, pts, ch, st, var_freq):
     read_tides = list(read)
-    qual_tides = list(qual)
+    #qual_tides = list(qual)
     
     loglike = 0.0
-    for i, nt in enumerate(read_tides): 
-        # calculate quality score
-        Q = ord(qual_tides[i]) - 33
-        # calculate base in resference
-        if i+1 in mutation_matrix:
-            ref_seq = mutation_matrix[i+1]
+    i = 0
+    indel = []
+    for mu in mutation_matrix:
+        if mu == 1:
+            Q = qual[i]
+            ref_seq = read_tides[i]
+        elif mu.find('-') != -1 or mu.find('del') != -1:
+            if mu.find('-') != -1:
+                position = st + i
+                mu = str(position) + '-' + mu
+                indel.append(mu)
+            continue # skip deletion
+        elif mu.find('+') != -1 or mu.find('ins') != -1:
+            if mu.find('+') != -1:
+                position = st + i
+                mu = str(position) + '-' + mu
+                indel.append(mu)
+            i = i + 1
+            continue # skip insertion
         else:
-            ref_seq=nt
-        
+            Q = qual[i]
+            ref_seq = mu        
+                
         position = st + i
-        prob_this_site=prob_site(ref_base=ref_seq,seq_base=nt,Q=Q,h=h,pts=pts,ch=ch,position=position,var_freq=var_freq)
+        prob_this_site=prob_site(ref_base=ref_seq,seq_base=read_tides[i],Q=Q,h=h,pts=pts,ch=ch,position=position,var_freq=var_freq)
         if prob_this_site > 0:
             loglike = loglike + math.log(prob_this_site)
         
-    
+        i = i + 1
+            
     return loglike
 
 
@@ -110,9 +125,6 @@ def cal_var_freq(mt_file,numt_file):
 
 # function to parse MD string
 def parseMD(MD):
-     
-    #parse MD string (cf. SAM Format Specification v1.4-r985) 
-
     mismatches, pos = [], 0
     for n in re.findall('(\d+|[a-zA-Z|^]+)', MD):
         if n.isalpha():
@@ -128,33 +140,37 @@ def parseMD(MD):
 
 
 # function to parse CIGAR and MD, output final mutation matrix
-def parseCIGAR(seq, startPos, CIGAR, MD):    
+def parseCIGAR(seq, CIGAR, MD):    
     match = parseMD(MD)
-    seqPos, refPos = 0, startPos
+    seqPos = 0
     
     for op, length in CIGAR:
         if op == 0: #match
-            refPos += length
             seqPos += length 
    
         elif op == 1: #insertion
-            match = match[:seqPos] + ["+" + seq[seqPos:(seqPos+length)]] + match[seqPos:]
+            if length > 1:
+                match = match[:seqPos] + ["+" + seq[seqPos:(seqPos+length)]] + ['ins_ext',] * (length - 1) + match[seqPos:]
+            else:
+                match = match[:seqPos] + [+1*length] + match[seqPos:]
+            #match = match[:seqPos] + ["+" + seq[seqPos:(seqPos+length)]] + match[seqPos:]
             seqPos += length 
    
         elif op == 2: #deletion
             if length > 1:
-                match = match[:seqPos] + [-length] + ['del_ext',] * (length - 1) + match[seqPos:]
+                match = match[:seqPos] + [str(-length)] + ['del_ext',] * (length - 1) + match[seqPos:]
             else:
-                match = match[:seqPos] + [-1*length] + match[seqPos:]
-            refPos += length
+                match = match[:seqPos] + [str(-1*length)] + match[seqPos:]
             seqPos += length
+        elif op == 4: #soft clip
+            continue
     
     mutation = dict()
     for i,item in enumerate(match):
         if item !=1 and item !='del_ext':
-            mutation[i] = item
+            mutation[i+1] = item
              
-    return mutation
+    return match
 
 
 # function to convert MD:Z tag to mutation matrix, assume no insertions and deletions
@@ -183,13 +199,14 @@ def convert_mutation_matrix(MDstring):
 # function to parse read
 def parse_read(r,h,pts_m,pts_n,var_freq):
     seq = r.query_alignment_sequence
-    qual = r.qual
+    qual = r.query_alignment_qualities
     MD = r.get_tag('MD')
     ch = r.reference_name
     st = r.reference_start + 1
     pts = (pts_m if ch == "chrM" else pts_n)
     
-    mutation_matrix=convert_mutation_matrix(MD)
+    #mutation_matrix=convert_mutation_matrix(MD)
+    mutation_matrix = parseCIGAR(seq=seq, CIGAR = r.cigartuples, MD=MD)
     loglike = prob_read(read=seq,qual=qual,mutation_matrix=mutation_matrix,h=h,pts=pts,ch=ch,st=st,var_freq=var_freq)
     return loglike
 
@@ -287,8 +304,8 @@ def main():
     numt_total = 0
     
     for r in samfile.fetch():
-        if re.findall('[IDS]',r.cigarstring) != []:
-            continue
+        #if re.findall('[IDS]',r.cigarstring) != []:
+        #    continue
         if readname == "" or r.qname != readname:
             if readname == "":
                 readname = r.qname
