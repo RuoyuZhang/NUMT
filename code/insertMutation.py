@@ -60,8 +60,10 @@ def parseMutation(mutation_file, ref_type = 'mt'):
 
 
 def insertSNPs(ref, mut, freq, force_insert):
-    if force_insert:
+    if force_insert == 'ins':
         freq = 1
+    elif force_insert == 'no':
+        freq =0
     
     if np.random.binomial(1,p=freq):
         return(mut)
@@ -70,7 +72,7 @@ def insertSNPs(ref, mut, freq, force_insert):
 
 
 def insertIndels(ref, mut, freq, force_insert):
-    
+    # consider this later
     return ref
 
 
@@ -82,7 +84,7 @@ def main():
     parser.add_option("--out", default="/home/fs01/rz253/project/BTRY4840/NUMT/data/prepare.data/test.fa",help="output fasta file")
     parser.add_option("--ref_type", type=str, default="numt", help="numt or mt? [numt]")
     parser.add_option("--insert_indel", action="store_false", help="insert indel? [F]")
-    parser.add_option("--force_insert", action="store_false", help="force insert? [F]")
+    parser.add_option("--force_insert", type=str, default = 'file', help="force insert? [file|ins|no]")
     
     (o, args) = parser.parse_args()
     
